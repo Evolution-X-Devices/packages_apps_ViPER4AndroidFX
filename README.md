@@ -1,6 +1,6 @@
-## ViPER4Android FX
+﻿## ViPER4Android FX
 
-This repository contains prebuilt ViPER4Android FX artifacts for integration into an AOSP-based ROM build tree.
+This repository contains prebuilt ViPER4Android FX artifacts for integration into an AOSP-based or custom Android ROM build tree.
 
 It provides:
 
@@ -12,7 +12,7 @@ It provides:
 - A working AOSP or custom ROM source tree.
 - This repository checked out at `packages/apps/ViPER4AndroidFX`.
 - A product or device makefile where product packages can be inherited, usually `device.mk`.
-- Device SELinux policy sources, including `audioserver.te`.
+- Device SELinux policy sources, usually under a device `sepolicy` directory.
 - The `libviperaidl` module available elsewhere in the build tree.
 
 ## Integration steps
@@ -29,35 +29,108 @@ The path matters because `config.mk` declares `BUILD_PATH := packages/apps/ViPER
 
 ### 2. Inherit the product configuration
 
-Add the package configuration to your device or product makefile, usually `device.mk`:
+Add the package configuration to your device or product makefile, usually `device/<vendor>/<device>/device.mk`:
 
 ```makefile
 $(call inherit-product, packages/apps/ViPER4AndroidFX/config.mk)
 ```
 
-This adds the following modules to the product:
+The included `config.mk` adds:
+
+```makefile
+PRODUCT_SOONG_NAMESPACES += \
+    packages/apps/ViPER4AndroidFX
+
+PRODUCT_PACKAGES += \
+    ViPER4AndroidFX \
+    libv4a_re
+
+RELAX_USES_LIBRARY_CHECK := true
+```
+
+### 3. Verify build dependencies and prebuilts
+
+The ROM tree must be able to build or provide these modules:
 
 - `ViPER4AndroidFX`
 - `libv4a_re`
+- `libviperaidl`
 
-It also adds this directory to `PRODUCT_SOONG_NAMESPACES` and enables `RELAX_USES_LIBRARY_CHECK`.
+`ViPER4AndroidFX` is a presigned prebuilt APK from:
 
-### 3. Verify the external dependency
+```text
+system/app/ViPER4AndroidFX/ViPER4AndroidFX.apk
+```
 
-`libv4a_re` declares `libviperaidl` as a required module in `Android.bp`.
+It overrides the stock `AudioFX` package through `LOCAL_OVERRIDES_PACKAGES := AudioFX` in `system/app/Android.mk`.
 
-Before building, confirm that your ROM tree already provides `libviperaidl`. If it does not, add the missing module from the ROM/device source that normally provides ViPER audio support.
+`libv4a_re` is declared as a prebuilt shared vendor library and depends on standard system shared libraries:
+
+- `liblog`
+- `libm`
+- `libdl`
+- `libc`
+
+The prebuilt audio effect libraries must exist at:
+
+```text
+vendor/lib/soundfx/libv4a_re.so
+vendor/lib64/soundfx/libv4a_re.so
+```
+
+The module installs them to the vendor `soundfx` path through:
+
+```bp
+vendor: true
+relative_install_path: "soundfx"
+compile_multilib: "both"
+```
 
 ### 4. Add SELinux policy
 
-Add the following rules to your device `audioserver.te` policy file:
+Do not run the SELinux rules in a host shell. They are Android SELinux policy statements and must be added to the device sepolicy used by the ROM build.
+
+#### Option 1: Copy the provided policy snippet
+
+Copy the provided policy file into your device sepolicy tree:
+
+```text
+packages/apps/ViPER4AndroidFX/sepolicy/audioserver_viper4android.te
+```
+
+For example:
+
+```text
+device/<vendor>/<device>/sepolicy/vendor/audioserver_viper4android.te
+```
+
+Then ensure the device sepolicy directory is included by the device tree, commonly in `BoardConfig.mk` or `BoardConfigCommon.mk`:
+
+```makefile
+BOARD_VENDOR_SEPOLICY_DIRS += \
+    device/<vendor>/<device>/sepolicy/vendor
+```
+
+Use `BOARD_SEPOLICY_DIRS` instead if your ROM/device tree still uses a non-vendor sepolicy layout.
+
+#### Option 2: Add the rules to an existing `audioserver.te`
+
+If your device tree already has an `audioserver.te`, add:
 
 ```te
-get_prop(audioserver, vendor_audio_prop) # If Google or MTK device skip line
+get_prop(audioserver, vendor_audio_prop)
 
-allow audioserver unlabeled:file { read write open getattr };
-allow hal_audio_default hal_audio_default:process { execmem };
+allow audioserver unlabeled:file {
+    getattr
+    open
+    read
+    write
+};
+
+allow hal_audio_default hal_audio_default:process execmem;
 ```
+
+For Google or MTK devices, skip `get_prop(audioserver, vendor_audio_prop)` if the device tree already grants the required vendor audio property access.
 
 Depending on your device tree and Android version, these rules may need to be adapted to satisfy existing neverallow rules or vendor policy constraints.
 
@@ -86,6 +159,18 @@ After a successful build, verify that the product output includes:
 - `libv4a_re.so` under the vendor sound effects library path for both supported ABIs.
 
 The prebuilt APK is signed with its existing certificate, so the module uses `LOCAL_CERTIFICATE := PRESIGNED`.
+
+## Integration checklist
+
+1. Put this module at `packages/apps/ViPER4AndroidFX`.
+2. Add the `inherit-product` line to `device.mk`.
+3. Confirm `PRODUCT_PACKAGES` includes `ViPER4AndroidFX` and `libv4a_re` through `config.mk`.
+4. Confirm `system/app/ViPER4AndroidFX/ViPER4AndroidFX.apk` exists.
+5. Confirm `vendor/lib/soundfx/libv4a_re.so` and `vendor/lib64/soundfx/libv4a_re.so` exist.
+6. Confirm `libviperaidl` is available in the ROM tree.
+7. Add the SELinux rules through the provided policy file or an existing `audioserver.te`.
+8. Ensure the device sepolicy directory is referenced by `BOARD_VENDOR_SEPOLICY_DIRS` or `BOARD_SEPOLICY_DIRS`.
+9. Build the ROM and verify that `libv4a_re.so` is installed under the vendor `soundfx` directory.
 
 ## Notes
 

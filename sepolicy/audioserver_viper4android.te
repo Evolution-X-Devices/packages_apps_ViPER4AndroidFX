@@ -1,0 +1,24 @@
+# SELinux policy additions for integrating ViPER4AndroidFX into a custom ROM.
+#
+# Copy these rules into the device sepolicy tree, or include this file from a
+# device-specific sepolicy directory that is referenced by BOARD_SEPOLICY_DIRS.
+# These are policy statements for the Android build system; do not run them in a
+# host shell such as PowerShell, bash, or cmd.exe.
+
+# Allow audioserver to read vendor audio properties.
+# Skip this line for Google or MTK devices if the device tree already provides
+# the required vendor audio property access.
+get_prop(audioserver, vendor_audio_prop)
+
+# Allow audioserver to access files that the ViPER4AndroidFX audio effect may
+# expose without a more specific label on some device trees.
+allow audioserver unlabeled:file {
+    getattr
+    open
+    read
+    write
+};
+
+# Required by the prebuilt ViPER4AndroidFX audio effect on device trees where
+# the default audio HAL domain needs executable memory for this effect library.
+allow hal_audio_default hal_audio_default:process execmem;
