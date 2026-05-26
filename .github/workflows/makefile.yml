@@ -1,4 +1,4 @@
-name: Makefile CI
+name: Validate prebuilts
 
 on:
   push:
@@ -7,21 +7,44 @@ on:
     branches: [ "bka" ]
 
 jobs:
-  build:
+  validate:
 
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v4
+    - name: Validate required files
+      run: |
+        test -f Android.bp
+        test -f Android.mk
+        test -f config.mk
+        test -f system/app/Android.mk
+        test -f system/app/ViPER4AndroidFX/ViPER4AndroidFX.apk
+        test -f vendor/lib/soundfx/libv4a_re.so
+        test -f vendor/lib64/soundfx/libv4a_re.so
+        test -f sepolicy/audioserver_viper4android.te
 
-    - name: configure
-      run: ./configure
+    - name: Validate artifact formats
+      run: |
+        python3 - <<'PY'
+        from pathlib import Path
 
-    - name: Install dependencies
-      run: make
+        checks = {
+            "system/app/ViPER4AndroidFX/ViPER4AndroidFX.apk": b"PK\x03\x04",
+            "vendor/lib/soundfx/libv4a_re.so": b"\x7fELF",
+            "vendor/lib64/soundfx/libv4a_re.so": b"\x7fELF",
+        }
 
-    - name: Run check
-      run: make check
+        for filename, magic in checks.items():
+            data = Path(filename).read_bytes()
+            if not data.startswith(magic):
+                raise SystemExit(f"{filename} has an unexpected file signature")
+        PY
 
-    - name: Run distcheck
-      run: make distcheck
+    - name: Validate module declarations
+      run: |
+        grep -q 'name: "libv4a_re"' Android.bp
+        grep -q 'vendor: true' Android.bp
+        grep -q 'compile_multilib: "both"' Android.bp
+        grep -q 'LOCAL_MODULE := ViPER4AndroidFX' system/app/Android.mk
+        grep -q 'LOCAL_CERTIFICATE := PRESIGNED' system/app/Android.mk
